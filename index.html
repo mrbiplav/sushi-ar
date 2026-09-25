@@ -234,7 +234,7 @@ import * as THREE from 'three';
    assemble the sushi. A wrong pick or a timeout costs one of three tries.
 
    Backends:
-     AR   (default)  MindAR image tracking, anchored to target.png
+     AR   (default)  MindAR image tracking, anchored to sushi_main.jpeg
      DEMO (?demo=1)  No target: the board floats in front of the camera
 
    Version pins matter: mind-ar@1.2.5 imports `sRGBEncoding` from three, which
@@ -247,9 +247,53 @@ const DEBUG = qs.has('debug');
 const TARGET_SRC = qs.get('target') || './targets.mind';
 
 const START_TRIES = 3;
-const BOARD_R     = .34;   // ingredient ring radius, in target-image widths
-const FIT_R       = .46;   // outer extent used for viewport fitting
 const LIFT        = .02;
+
+/* Layout is expressed in MindAR anchor units, where the target image's WIDTH is
+   always 1.0 and its height is 1/aspect — so a 3:2 card only spans ±0.333
+   vertically. A fixed circular ring would hang off the top and bottom of any
+   non-square target, so the ingredient ring is an ellipse fitted to the actual
+   target, read from the compiled descriptor at runtime (see applyTargetAspect).
+   These are the defaults, matching the shipped 3:2 target. */
+const DEFAULT_ASPECT = 1.5;
+const RING = { rx:.42, ry:.28 };   // ingredient ring semi-axes
+const FIT  = { rx:.52, ry:.38 };   // outer extent used for demo viewport fitting
+
+/** Fit the ring inside a target of the given aspect, leaving a margin.
+    Each axis takes 84% of the card's half-extent, so a square target gets a
+    plain circle and only a wide or tall one gets squashed. */
+function applyTargetAspect(aspect){
+  const halfH = .5 / aspect;                  // half the card height, in width units
+  RING.rx = .42;                              // 84% of the half-width, which is always .5
+  RING.ry = Math.min(.42, halfH * .84);
+  FIT.rx  = RING.rx + .10;
+  FIT.ry  = RING.ry + .10;
+}
+applyTargetAspect(DEFAULT_ASPECT);
+
+/* Equal ANGLE steps around an ellipse bunch the points up at the ends of the
+   major axis: on the 3:2 ring the gaps come out 0.23 at the sides against 0.33
+   at top and bottom. That is not tight enough to overlap a label, so this is
+   about looking deliberate rather than about collisions — walking the perimeter
+   by arc length instead evens the gaps to within ~6%. */
+function ellipseRing(n, phase){
+  const N = 512, pts = [], cum = [0];
+  const P = (t) => [RING.rx * Math.cos(t), RING.ry * Math.sin(t)];
+  let prev = P(0);
+  for (let i = 1; i <= N; i++){
+    const p = P(i / N * Math.PI * 2);
+    cum.push(cum[i - 1] + Math.hypot(p[0] - prev[0], p[1] - prev[1]));
+    prev = p;
+  }
+  const total = cum[N];
+  for (let k = 0; k < n; k++){
+    const want = ((k / n + phase / (Math.PI * 2)) % 1) * total;
+    let i = cum.findIndex((c) => c >= want);
+    if (i < 0) i = N;
+    pts.push(P(i / N * Math.PI * 2));
+  }
+  return pts;
+}
 
 // ------------------------------------------------------------------ DOM
 const $ = (id) => document.getElementById(id);
@@ -503,7 +547,7 @@ const S = {
   phase:'idle',            // idle | playing | between | over
   score:0, shown:0, tries:START_TRIES, served:0, streak:0, bestStreak:0,
   tracked:DEMO, recipe:null, step:0, timeLeft:0, timeMax:0, lastTickSec:-1,
-  items:[],                // palette entries currently on the board
+  items:[], ringPhase:0,   // palette entries currently on the board
   stack:[],                // meshes already added to the build
   busy:false,              // true during completion animation
 };
@@ -516,6 +560,7 @@ const board = new THREE.Group();
 const buildSpot = new THREE.Group();     // where the sushi assembles
 const paletteRoot = new THREE.Group();
 const fx = new THREE.Group();
+let lockRing, matMesh;
 {
   board.add(new THREE.HemisphereLight(0xffffff, 0x3d4650, 2.3));
   const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(.35, .55, .95);
@@ -523,14 +568,28 @@ const fx = new THREE.Group();
   const rim = new THREE.DirectionalLight(0x9fd8ff, .55); rim.position.set(-.6, -.3, .5);
   board.add(rim);
 
-  // lock-on ring + bamboo mat under the build area
-  board.add(m(GEO.torus, new THREE.MeshBasicMaterial(
-    { color:0x43d6a3, transparent:true, opacity:.5 }), [BOARD_R, BOARD_R, BOARD_R]));
-  const mat = m(GEO.cyl, std(0xc9a668, { roughness:.85, opacity:.92 }),
-                [.21,.006,.21], [0,0,.003]);
-  mat.rotation.x = Math.PI / 2;                       // lie flat in the plate plane
-  board.add(mat);
+  // lock-on ring + bamboo mat under the build area. Both are re-scaled by
+  // relayout() once the real target aspect is known.
+  lockRing = m(GEO.torus, new THREE.MeshBasicMaterial(
+    { color:0x43d6a3, transparent:true, opacity:.5 }), [RING.rx, RING.ry, RING.ry]);
+  board.add(lockRing);
+  matMesh = m(GEO.cyl, std(0xc9a668, { roughness:.85, opacity:.92 }),
+              [.21,.006,.21], [0,0,.003]);
+  matMesh.rotation.x = Math.PI / 2;                   // lie flat in the plate plane
+  board.add(matMesh);
   board.add(buildSpot, paletteRoot, fx);
+}
+
+/** Re-fit ring, mat and any live ingredients after the target aspect changes. */
+function relayout(){
+  lockRing.scale.set(RING.rx, RING.ry, RING.ry);
+  const mr = Math.min(.21, RING.ry * .74);
+  matMesh.scale.set(mr, .006, mr);
+  const pts = ellipseRing(S.items.length, S.ringPhase);
+  S.items.forEach((it, i) => {
+    it.home.set(pts[i][0], pts[i][1], LIFT);
+    if (it.alive) it.node.position.copy(it.home);
+  });
 }
 
 // Ingredients are modelled Y-up; the target plane is XY with +Z out of it.
@@ -579,16 +638,16 @@ function buildOrder(){
   clearPalette();
   clearStack();
 
-  const a0 = Math.random() * Math.PI * 2;
+  S.ringPhase = Math.random() * Math.PI * 2;
+  const pts = ellipseRing(keys.length, S.ringPhase);
   keys.forEach((key, i) => {
-    const a = a0 + i / keys.length * Math.PI * 2;
     const inner = ING[key].build();
     const node = new THREE.Group();
     node.add(tilted(inner));
     const lab = labelSprite(ING[key].name);
     lab.position.set(0, 0, .075);
     node.add(lab);
-    node.position.set(Math.cos(a) * BOARD_R, Math.sin(a) * BOARD_R, LIFT);
+    node.position.set(pts[i][0], pts[i][1], LIFT);
     node.scale.setScalar(.001);
     paletteRoot.add(node);
 
@@ -873,6 +932,18 @@ async function startAR(){
   anchor.onTargetLost  = () => { S.tracked = false;
     if (S.phase === 'playing') showStatus('Target lost', 'Point back at the image to resume'); };
   await mindar.start();
+
+  /* MindAR normalises anchor space to the target image's WIDTH (see the
+     postMatrix it builds from markerDimensions), so the card's height is
+     1/aspect and a non-square target needs the ring re-fitted. Reading the real
+     dimensions here means swapping in any `.mind` just works. */
+  const dims = mindar.controller?.markerDimensions?.[0];
+  if (dims && dims[0] && dims[1]){
+    applyTargetAspect(dims[0] / dims[1]);
+    relayout();
+    if (DEBUG) console.log(`target ${dims[0]}x${dims[1]}  ring rx=${RING.rx.toFixed(3)} ry=${RING.ry.toFixed(3)}`);
+  }
+
   lastT = performance.now();
   renderer.setAnimationLoop(() => frame(renderer, scene, camera));
 }
@@ -910,7 +981,9 @@ async function startDemo(){
   function fitBoard(){
     const halfH = DIST * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const halfW = halfH * camera.aspect;
-    const s = Math.min(1, .86 * Math.min(halfW, halfH) / FIT_R);
+    // The ring is an ellipse now, so constrain each axis by its own extent.
+    // Ignoring the holder's tilt only ever makes the vertical fit safer.
+    const s = Math.min(1, .86 * Math.min(halfW / FIT.rx, halfH / FIT.ry));
     holder.scale.setScalar(s);
     holder.position.set(0, -.08 * s, -DIST);
   }

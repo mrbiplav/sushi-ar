@@ -8,10 +8,14 @@ a playable sushi-building game appears anchored on the plate. No app install.
 | File | What it is |
 |---|---|
 | `index.html` | The entire game. Self-contained: inline CSS + JS, three.js/MindAR from CDN, all 3D geometry generated in code. No binary assets. |
-| `target.png` | The image target. Print this (or show it on a second screen). |
-| `targets.mind` | Pre-compiled MindAR descriptor for `target.png`. Already built — nothing to do. |
+| `sushi_main.jpeg` | **The image target.** Print this (or show it on a second screen). |
+| `targets.mind` | Pre-compiled MindAR descriptor for `sushi_main.jpeg`. Already built — nothing to do. |
+| `target.png` | Alternative target: a generated high-contrast card. Use with `?target=./target_card.mind`. |
+| `target_card.mind` | Descriptor for `target.png`. |
 | `tools/make_target.py` | Regenerates `target.png`. |
 | `tools/compile_target.mjs` | Compiles any image → `.mind`, offline. |
+| `tools/mktest.mjs` | Lifts the game module out of `index.html` so it can be tested headlessly in node. |
+| `tests/` | Headless test suite — game logic, target-aspect layout, viewport fit. `tests/run.sh`. |
 
 ## 1. Try it with no target first
 
@@ -27,22 +31,31 @@ Add `?debug=1` for an FPS / tracking-state readout.
 
 WebAR needs **HTTPS** — camera access is blocked on plain HTTP (except
 `localhost`). GitHub Pages, Vercel, Netlify or Cloudflare Pages all work; it's
-three static files, so any of them is a drag-and-drop.
+a handful of static files, so any of them is a drag-and-drop.
 
 ```
 index.html
-target.png
 targets.mind
+sushi_main.jpeg      # so you can reprint the target from the live site
+target.png           # optional, alternative target
+target_card.mind     # optional
 ```
 
 ## 3. Print the target
 
-Print `target.png` at roughly **15 cm** square on **matte** paper.
+Print `sushi_main.jpeg` about **18 cm wide** (it's 3:2, so ~18 × 12 cm) on
+**matte** paper.
 
 - Matte matters — glossy paper throws glare that destroys tracking.
 - Bigger is better. A small print means you must hold the phone close.
-- A tablet/monitor showing the PNG also works, but screen glare and refresh
+- A tablet/monitor showing the image also works, but screen glare and refresh
   banding make it less reliable than paper.
+- Don't crop it. The descriptor is compiled from the full frame, and cropping
+  changes the aspect the game lays itself out against.
+
+The game reads the target's real dimensions out of the descriptor at runtime and
+fits the ingredient ring to them, so a wide card gets an elliptical ring and a
+square one gets a circle. Swapping in your own `.mind` needs no code change.
 
 ## 4. Write the NFC tag
 
@@ -113,13 +126,27 @@ npm install mind-ar@1.2.5 canvas
 node tools/compile_target.mjs my-image.png targets.mind
 ```
 
-It prints a feature count and a verdict. `target.png` scores 2777 detection
-points over 12 scale levels and 35 tracking points. If your own image reports
+It prints a feature count and a verdict. For reference, `sushi_main.jpeg` scores
+1877 detection points over 11 scale levels and 52 tracking points; the generated
+`target.png` card scores 2777 / 35. If your own image reports
 well under a few hundred detection points, fix the artwork rather than fighting
 the tracker.
 
 You can also point the game at a different descriptor without editing anything:
 `index.html?target=./other.mind`
+
+## Tests
+
+The game is one HTML file, so `tools/mktest.mjs` extracts the module, fronts it
+with a browser stub and exports the internals. Then:
+
+```sh
+npm install three@0.160.0 mind-ar@1.2.5 canvas
+tests/run.sh
+```
+
+Covers game logic (40 assertions), ring fitting across target aspect ratios (23),
+and board framing across 9 device aspect ratios.
 
 ## Version pins — do not bump casually
 
