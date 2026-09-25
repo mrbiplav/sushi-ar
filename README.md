@@ -1,7 +1,7 @@
-# Sushi Rush — NFC → WebAR game
+# Sushi Chef — NFC → WebAR game
 
 Tap an NFC tag → browser opens → camera viewfinder → point at the sushi target →
-a playable sushi game appears anchored on the plate. No app install.
+a playable sushi-building game appears anchored on the plate. No app install.
 
 ## Files
 
@@ -16,8 +16,10 @@ a playable sushi game appears anchored on the plate. No app install.
 ## 1. Try it with no target first
 
 Serve the folder over HTTPS and open `index.html?demo=1`. Demo mode skips image
-tracking entirely — the platter floats in front of the camera so you can verify
-the gameplay works before dealing with targets.
+tracking entirely — the board floats in front of the camera so you can verify
+the gameplay works before dealing with targets. There is **nothing to scan** in
+demo mode; the camera feed is just a backdrop. The board auto-fits to your
+screen's aspect ratio, so it works in portrait too.
 
 Add `?debug=1` for an FPS / tracking-state readout.
 
@@ -66,9 +68,25 @@ https://your-host.example/sushi-ar/
 
 ## 5. Gameplay
 
-Sushi orbits the plate. Tap pieces to serve them. Nigiri = 100, maki = 150, and
-every 4 pieces in a row raises the multiplier. **Tapping wasabi costs a life** —
-three lives, 60 seconds.
+You're the chef. An **order ticket** names a sushi; ingredients float in a ring
+around the plate. Tap them **in the right order** to build it — the stack grows
+piece by piece in front of you, and the ticket ticks off each step as you go.
+
+- **Order matters.** Nori before rice before the fill. The ticket shows the
+  sequence; the next step is highlighted.
+- **Decoys.** The ring always holds ingredients the recipe doesn't want.
+- **3 tries, and that's it.** A wrong ingredient or a timed-out order burns one.
+  Three gone → game over.
+- **Timer per order**, scaled to recipe length. It gets shorter as you serve
+  more. The last 30% ticks audibly.
+- **Score** = 300 per order + up to 240 speed bonus, multiplied by a streak
+  bonus that steps up every 3 consecutive orders (×1.5, ×2.0, …). Partial credit
+  lands on each correct pick. A wrong pick resets the streak.
+- **Difficulty ramp.** Recipes grow from 2 to 5 steps (every 3 orders) and the
+  ring grows from 4 to 8 slots (every 2 orders).
+
+14 recipes across nigiri and maki — Salmon Nigiri, Kappa Maki, California Roll,
+Rainbow Roll, Chef's Special — drawn from 12 procedurally modelled ingredients.
 
 If the target goes out of frame the round **pauses** rather than punishing you,
 and resumes when tracking recovers.
@@ -95,8 +113,8 @@ npm install mind-ar@1.2.5 canvas
 node tools/compile_target.mjs my-image.png targets.mind
 ```
 
-It prints a feature count and a verdict. `target.png` scores ~2787 detection
-points over 12 scale levels and 34 tracking points. If your own image reports
+It prints a feature count and a verdict. `target.png` scores 2777 detection
+points over 12 scale levels and 35 tracking points. If your own image reports
 well under a few hundred detection points, fix the artwork rather than fighting
 the tracker.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate a print-ready image target for Sushi Rush AR.
+Generate a print-ready image target for Sushi Chef AR.
 
 Image-tracking quality is decided almost entirely by the target artwork, so this
 is designed against the things that actually break MindAR tracking:
@@ -186,8 +186,8 @@ def main():
     chopsticks(d)
 
     # ---- typography: excellent corner features, placed off-centre
-    d.text((92, 1016), "SUSHI RUSH", font=font("bold", 86), fill=INK)
-    d.text((372, 962), "SCAN  •  PLAY  •  AR",
+    d.text((92, 1016), "SUSHI CHEF", font=font("bold", 86), fill=INK)
+    d.text((372, 962), "SCAN  •  BUILD  •  AR",
            font=font("mono", 26), fill=(120, 112, 100))
     d.text((905, 118), "寿司", font=font("cjk", 108), fill=ACCENT)
     for i, ch in enumerate("TARGET-01"):
