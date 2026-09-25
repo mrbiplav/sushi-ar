@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b0d10">
+<title>Sushi Rush AR</title>
+<style>
+  :root{
+    --bg:#0b0d10; --ink:#f4f6f8; --dim:#9aa4ae;
+    --good:#4ec9a5; --bad:#ff5c5c; --hot:#ffb02e;
+    --safe-t:env(safe-area-inset-top,0px);
+    --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font:500 16px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    overscroll-behavior:none;touch-action:none;user-select:none;-webkit-user-select:none}
+
+  /* MindAR injects its <video> + <canvas> in here */
+  #ar{position:fixed;inset:0;width:100%;height:100%}
+  #ar canvas,#ar video{display:block}
+
+  /* ---------- HUD ---------- */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10;
+       padding:calc(var(--safe-t) + 12px) 14px calc(var(--safe-b) + 12px)}
+  .row{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .pill{background:rgba(11,13,16,.58);backdrop-filter:blur(10px);
+        -webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.14);
+        border-radius:14px;padding:8px 12px;font-variant-numeric:tabular-nums}
+  .label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  .val{font-size:22px;font-weight:800;line-height:1.1}
+  #combo{color:var(--hot);transition:transform .12s ease}
+  #combo.bump{transform:scale(1.28)}
+  #time.low{color:var(--bad)}
+
+  /* centre status line */
+  #status{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+          text-align:center;padding:0 28px;font-size:15px;color:var(--ink);
+          opacity:0;transition:opacity .25s ease;text-shadow:0 2px 12px rgba(0,0,0,.7)}
+  #status.on{opacity:1}
+  #status .sub{display:block;margin-top:6px;font-size:13px;color:var(--dim)}
+
+  /* floating score popups */
+  #pops{position:absolute;inset:0;overflow:hidden}
+  .pop{position:absolute;transform:translate(-50%,-50%);font-weight:800;font-size:20px;
+       animation:rise .75s ease-out forwards;text-shadow:0 2px 10px rgba(0,0,0,.6)}
+  @keyframes rise{to{transform:translate(-50%,-160%);opacity:0}}
+
+  /* damage flash */
+  #flash{position:fixed;inset:0;z-index:9;pointer-events:none;background:var(--bad);opacity:0;
+         transition:opacity .28s ease}
+  #flash.on{opacity:.34;transition:opacity .05s}
+
+  /* ---------- overlays (gate / gameover / error) ---------- */
+  .sheet{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
+         align-items:center;justify-content:center;text-align:center;gap:14px;
+         padding:32px 26px;background:rgba(8,10,13,.9);
+         backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+  .sheet[hidden]{display:none}
+  .sheet h1{margin:0;font-size:30px;font-weight:850;letter-spacing:-.02em}
+  .sheet p{margin:0;max-width:33ch;color:var(--dim);font-size:14.5px}
+  .btn{pointer-events:auto;margin-top:6px;border:0;border-radius:999px;padding:16px 38px;
+       font:800 17px/1 inherit;color:#0b0d10;background:var(--ink);cursor:pointer}
+  .btn:active{transform:scale(.96)}
+  .big{font-size:56px;font-weight:850;color:var(--hot);
+       font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+  .hint{font-size:12px;color:#6d7680;max-width:34ch}
+  code{background:rgba(255,255,255,.1);padding:2px 6px;border-radius:5px;font-size:12px}
+  #errbox{white-space:pre-wrap;text-align:left;font:400 12px/1.5 ui-monospace,monospace;
+          color:#ffb4b4;background:rgba(255,92,92,.1);border:1px solid rgba(255,92,92,.3);
+          border-radius:10px;padding:12px;max-width:100%;overflow:auto;max-height:36vh}
+  #dbg{position:fixed;left:8px;bottom:calc(var(--safe-b) + 8px);z-index:11;
+       font:400 11px/1.5 ui-monospace,monospace;color:#7fe3c4;pointer-events:none;
+       text-shadow:0 1px 4px #000}
+</style>
+</head>
+<body>
+
+<div id="ar"></div>
+
+<div id="hud">
+  <div class="row">
+    <div class="pill">
+      <div class="label">Score</div>
+      <div class="val" id="score">0</div>
+    </div>
+    <div class="pill" style="text-align:center">
+      <div class="label">Combo</div>
+      <div class="val" id="combo">&times;1</div>
+    </div>
+    <div class="pill" style="text-align:right">
+      <div class="label">Time</div>
+      <div class="val" id="time">60</div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <div class="pill" id="lives">&#10084;&#10084;&#10084;</div>
+  </div>
+  <div id="pops"></div>
+  <div id="status"></div>
+</div>
+
+<div id="flash"></div>
+<div id="dbg" hidden></div>
+
+<!-- start gate: needed so iOS grants camera + unlocks WebAudio on a real gesture -->
+<section class="sheet" id="gate">
+  <h1>&#127843; Sushi Rush</h1>
+  <p id="gateMsg">Point your camera at the sushi plate, then tap the sushi as it comes around the platter. Dodge the wasabi.</p>
+  <button class="btn" id="startBtn">Start</button>
+  <p class="hint" id="gateHint">Camera access is required. Nothing is uploaded &mdash; all tracking runs on your device.</p>
+</section>
+
+<section class="sheet" id="over" hidden>
+  <div class="label">Final score</div>
+  <div class="big" id="finalScore">0</div>
+  <p id="overMsg"></p>
+  <button class="btn" id="againBtn">Play again</button>
+</section>
+
+<section class="sheet" id="err" hidden>
+  <h1>Couldn't start</h1>
+  <div id="errbox"></div>
+  <button class="btn" id="retryBtn">Retry</button>
+</section>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* =========================================================================
+   Sushi Rush AR
+   NFC tag -> this page -> camera viewfinder -> image-tracked sushi platter.
+
+   Two backends:
+     AR   (default)  MindAR image tracking, scene anchored to the target image.
+     DEMO (?demo=1)  No target needed: camera feed + platter floating in front
+                     of you. Use this to test gameplay before compiling a target.
+
+   Version pins matter: mind-ar@1.2.5 imports `sRGBEncoding` from three, which
+   was removed in three r162. Do not bump three past 0.160.0.
+   ========================================================================= */
+
+const qs    = new URLSearchParams(location.search);
+const DEMO  = qs.has('demo');
+const DEBUG = qs.has('debug');
+const TARGET_SRC = qs.get('target') || './targets.mind';
+
+const ROUND_SECONDS = 60;
+const START_LIVES   = 3;
+
+// ---------------------------------------------------------------- DOM helpers
+const $ = (id) => document.getElementById(id);
+const el = {
+  ar:$('ar'), score:$('score'), combo:$('combo'), time:$('time'), lives:$('lives'),
+  status:$('status'), pops:$('pops'), flash:$('flash'), dbg:$('dbg'),
+  gate:$('gate'), gateMsg:$('gateMsg'), gateHint:$('gateHint'), startBtn:$('startBtn'),
+  over:$('over'), finalScore:$('finalScore'), overMsg:$('overMsg'), againBtn:$('againBtn'),
+  err:$('err'), errbox:$('errbox'), retryBtn:$('retryBtn'),
+};
+
+function showStatus(main, sub){
+  el.status.innerHTML = main ? main + (sub ? `<span class="sub">${sub}</span>` : '') : '';
+  el.status.classList.toggle('on', !!main);
+}
+function fail(e){
+  console.error(e);
+  el.errbox.textContent = (e && (e.stack || e.message)) || String(e);
+  el.gate.hidden = true; el.over.hidden = true; el.err.hidden = false;
+}
+
+// ------------------------------------------------------------------ mini audio
+const Sfx = (() => {
+  let ctx = null;
+  const unlock = () => {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+  };
+  const tone = (freq, dur = .1, type = 'sine', gain = .16) => {
+    if (!ctx) return;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, ctx.currentTime);
+    g.gain.linearRampToValueAtTime(gain, ctx.currentTime + .012);
+    g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + dur);
+    o.connect(g).connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + dur + .02);
+  };
+  return {
+    unlock,
+    hit:(combo) => tone(520 * Math.pow(1.0595, Math.min(combo, 16)), .11, 'triangle', .18),
+    bad:()       => { tone(150, .26, 'sawtooth', .2); tone(96, .32, 'square', .12); },
+    miss:()      => tone(210, .12, 'sine', .1),
+    over:()      => [0,120,240].forEach((d,i) => setTimeout(() => tone([440,330,220][i], .3, 'triangle', .16), d)),
+  };
+})();
+const buzz = (ms) => { try { navigator.vibrate?.(ms); } catch {} };
+
+// ------------------------------------------------------------- procedural art
+// Everything is generated in code — no binary assets, so this file is the
+// whole game and survives a copy-paste transfer.
+
+const MAT = {
+  rice:    new THREE.MeshStandardMaterial({ color:0xf8f4ea, roughness:.85, metalness:0, transparent:true }),
+  nori:    new THREE.MeshStandardMaterial({ color:0x20302a, roughness:.7,  metalness:0, transparent:true }),
+  salmon:  new THREE.MeshStandardMaterial({ color:0xff8155, roughness:.45, metalness:0, transparent:true }),
+  tuna:    new THREE.MeshStandardMaterial({ color:0xd8465c, roughness:.45, metalness:0, transparent:true }),
+  egg:     new THREE.MeshStandardMaterial({ color:0xf6c43f, roughness:.5,  metalness:0, transparent:true }),
+  avocado: new THREE.MeshStandardMaterial({ color:0x8dc152, roughness:.6,  metalness:0, transparent:true }),
+  wasabi:  new THREE.MeshStandardMaterial({ color:0x76c043, roughness:.35, metalness:0,
+                                            emissive:0x2f5e15, transparent:true }),
+};
+
+// Shared geometries — created once, reused by every piece.
+const GEO = {
+  riceBall: new THREE.SphereGeometry(.5, 18, 12),
+  slab:     new THREE.SphereGeometry(.5, 18, 12),
+  roll:     new THREE.CylinderGeometry(.5, .5, 1, 22),
+  disc:     new THREE.CylinderGeometry(.5, .5, 1, 22),
+  core:     new THREE.CylinderGeometry(.5, .5, 1, 14),
+  bomb:     new THREE.IcosahedronGeometry(.5, 0),
+  ring:     new THREE.TorusGeometry(1, .012, 8, 72),
+};
+
+// Geometries are shared (the expensive part), but each mesh gets its OWN
+// material clone: the pop animation fades opacity per piece, and a shared
+// material would fade every other piece using it at the same time.
+const mesh = (geo, mat, scale, pos, rot) => {
+  const m = new THREE.Mesh(geo, mat.clone());
+  if (scale) m.scale.set(...scale);
+  if (pos)   m.position.set(...pos);
+  if (rot)   m.rotation.set(...rot);
+  return m;
+};
+
+const TOPPINGS = ['salmon', 'tuna', 'egg'];
+
+/** Nigiri: rice pillow + fish slab. Modelled Y-up, ~0.14 units wide. */
+function makeNigiri(){
+  const g = new THREE.Group();
+  g.add(mesh(GEO.riceBall, MAT.rice, [.14, .075, .09], [0, .037, 0]));
+  const top = TOPPINGS[(Math.random() * TOPPINGS.length) | 0];
+  g.add(mesh(GEO.slab, MAT[top], [.15, .028, .10], [0, .082, 0], [0, 0, .08]));
+  return { root:g, points:100, bad:false, hit:.10 };
+}
+
+/** Maki roll: nori cylinder, rice face, coloured core. */
+function makeMaki(){
+  const g = new THREE.Group();
+  g.add(mesh(GEO.roll, MAT.nori,    [.13, .10, .13], [0, .05,  0]));
+  g.add(mesh(GEO.disc, MAT.rice,    [.115,.105,.115],[0, .052, 0]));
+  g.add(mesh(GEO.core, MAT.avocado, [.05, .11, .05], [0, .054, 0]));
+  return { root:g, points:150, bad:false, hit:.10 };
+}
+
+/** Wasabi bomb — tapping this hurts. Spiky + emissive so it reads as a hazard. */
+function makeWasabi(){
+  const g = new THREE.Group();
+  g.add(mesh(GEO.bomb, MAT.wasabi, [.11, .11, .11], [0, .055, 0]));
+  g.add(mesh(GEO.bomb, MAT.wasabi, [.07, .07, .07], [.04, .085, .03], [.6, .4, 0]));
+  return { root:g, points:0, bad:true, hit:.095 };
+}
+
+// ------------------------------------------------------------------ game logic
+const S = {
+  phase:'idle',        // idle | playing | over
+  score:0, combo:0, lives:START_LIVES, timeLeft:ROUND_SECONDS,
+  tracked:DEMO,        // demo mode is always "tracked"
+  pieces:[], nextSpawn:0, elapsed:0,
+};
+
+const RADIUS = .30;    // orbit radius, in target-image widths (image width = 1.0)
+const LIFT   = .02;    // hover above the plate plane
+
+/** The platter. Parented onto the AR anchor (or a fixed node in demo mode). */
+const platter = new THREE.Group();
+{
+  const ring = mesh(GEO.ring, new THREE.MeshBasicMaterial({
+    color:0x4ec9a5, transparent:true, opacity:.34 }), [RADIUS, RADIUS, RADIUS]);
+  platter.add(ring);                       // confirms the anchor locked on
+  platter.add(new THREE.HemisphereLight(0xffffff, 0x404a55, 2.1));
+  const key = new THREE.DirectionalLight(0xffffff, 1.5);
+  key.position.set(.4, .6, .9);
+  platter.add(key);
+}
+
+function spawn(){
+  // Difficulty ramp: wasabi gets likelier and the platter speeds up over time.
+  const p = Math.min(.14 + S.elapsed / ROUND_SECONDS * .22, .38);
+  const piece = Math.random() < p ? makeWasabi()
+              : Math.random() < .42 ? makeMaki()
+              : makeNigiri();
+
+  // Pieces are modelled Y-up; the target image plane is XY with +Z out of it.
+  // This wrapper tips them so "up" points out of the plate.
+  const tilt = new THREE.Group();
+  tilt.rotation.x = Math.PI / 2;
+  tilt.add(piece.root);
+
+  const node = new THREE.Group();
+  node.add(tilt);
+  platter.add(node);
+
+  Object.assign(piece, {
+    node, theta:-Math.PI / 2, travelled:0, spin:Math.random() * Math.PI * 2,
+    state:'live', t:0,
+  });
+  piece.root.traverse(o => { if (o.isMesh) o.userData.piece = piece; });
+  S.pieces.push(piece);
+}
+
+function popText(piece, text, color){
+  if (!activeCamera) return;                 // purely cosmetic — never let it throw
+  const v = new THREE.Vector3();
+  piece.node.getWorldPosition(v).project(activeCamera);
+  const d = document.createElement('div');
+  d.className = 'pop'; d.textContent = text; d.style.color = color;
+  d.style.left = `${(v.x * .5 + .5) * 100}%`;
+  d.style.top  = `${(-v.y * .5 + .5) * 100}%`;
+  el.pops.appendChild(d);
+  setTimeout(() => d.remove(), 760);
+}
+
+function tap(piece){
+  if (piece.state !== 'live' || S.phase !== 'playing') return;
+  piece.state = 'popping'; piece.t = 0;
+
+  if (piece.bad){
+    S.combo = 0; S.lives--;
+    Sfx.bad(); buzz(120);
+    el.flash.classList.add('on');
+    setTimeout(() => el.flash.classList.remove('on'), 90);
+    popText(piece, 'WASABI!', '#ff5c5c');
+    if (S.lives <= 0) return gameOver('Wasabi got you.');
+  } else {
+    S.combo++;
+    const mult = 1 + Math.floor(S.combo / 4);
+    const gained = piece.points * mult;
+    S.score += gained;
+    Sfx.hit(S.combo); buzz(18);
+    popText(piece, `+${gained}`, '#4ec9a5');
+    el.combo.classList.add('bump');
+    setTimeout(() => el.combo.classList.remove('bump'), 130);
+  }
+  syncHud();
+}
+
+function removePiece(piece){
+  platter.remove(piece.node);
+  // Dispose the per-piece material clones; shared geometries are left alone.
+  piece.root.traverse(o => { if (o.isMesh) o.material.dispose(); });
+  const i = S.pieces.indexOf(piece);
+  if (i !== -1) S.pieces.splice(i, 1);
+}
+
+function clearPieces(){ [...S.pieces].forEach(removePiece); }
+
+function syncHud(){
+  el.score.textContent = S.score.toLocaleString();
+  el.combo.textContent = '×' + (1 + Math.floor(S.combo / 4));
+  el.time.textContent  = Math.ceil(S.timeLeft);
+  el.time.classList.toggle('low', S.timeLeft <= 10);
+  el.lives.innerHTML   = '❤'.repeat(Math.max(S.lives, 0)) || '—';
+}
+
+function startRound(){
+  Object.assign(S, { phase:'playing', score:0, combo:0, lives:START_LIVES,
+                     timeLeft:ROUND_SECONDS, nextSpawn:.4, elapsed:0 });
+  clearPieces();
+  el.over.hidden = true; el.gate.hidden = true;
+  syncHud();
+  showStatus(S.tracked ? '' : 'Find the sushi plate', 'Hold your camera steady over the target');
+}
+
+function gameOver(why){
+  S.phase = 'over';
+  clearPieces();
+  Sfx.over();
+  el.finalScore.textContent = S.score.toLocaleString();
+  el.overMsg.textContent = why;
+  el.over.hidden = false;
+  showStatus('');
+}
+
+/** Per-frame update. dt in seconds. */
+function update(dt){
+  if (S.phase !== 'playing') return;
+
+  // Not tracking the target? Freeze the round instead of punishing the player.
+  if (!S.tracked){
+    S.pieces.forEach(p => { if (p.state === 'live') p.root.rotation.y += dt * .8; });
+    return;
+  }
+
+  S.elapsed  += dt;
+  S.timeLeft -= dt;
+  if (S.timeLeft <= 0){ S.timeLeft = 0; syncHud(); return gameOver('Time!'); }
+
+  const omega = .55 + S.elapsed / ROUND_SECONDS * .55;   // rad/s, ramps up
+  S.nextSpawn -= dt;
+  if (S.nextSpawn <= 0){
+    spawn();
+    S.nextSpawn = Math.max(1.25 - S.elapsed / ROUND_SECONDS * .75, .42);
+  }
+
+  for (const p of [...S.pieces]){
+    if (p.state === 'live'){
+      p.theta    += omega * dt;
+      p.travelled += omega * dt;
+      p.spin     += dt * 1.1;
+      p.node.position.set(Math.cos(p.theta) * RADIUS, Math.sin(p.theta) * RADIUS,
+                          LIFT + Math.sin(p.spin * 1.6) * .012);
+      p.root.rotation.y = p.spin;
+      if (p.travelled >= Math.PI * 2){          // completed a lap, unserved
+        if (!p.bad){ S.combo = 0; Sfx.miss(); syncHud(); }
+        removePiece(p);
+      }
+    } else {                                     // pop animation
+      p.t += dt;
+      const k = Math.min(p.t / .22, 1);
+      p.node.scale.setScalar(1 + k * .7);
+      p.root.traverse(o => { if (o.isMesh) o.material.opacity = 1 - k; });
+      if (k >= 1) removePiece(p);
+    }
+  }
+  syncHud();
+}
+
+// -------------------------------------------------------------- input (tap)
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let activeCamera = null;
+
+function onTap(ev){
+  if (S.phase !== 'playing' || !S.tracked || !activeCamera) return;
+  const t = ev.changedTouches ? ev.changedTouches[0] : ev;
+  ndc.x =  (t.clientX / window.innerWidth)  * 2 - 1;
+  ndc.y = -(t.clientY / window.innerHeight) * 2 + 1;
+  ray.setFromCamera(ndc, activeCamera);
+  const hits = ray.intersectObjects(S.pieces.filter(p => p.state === 'live').map(p => p.root), true);
+  if (hits.length) tap(hits[0].object.userData.piece);
+}
+window.addEventListener('pointerdown', onTap, { passive:true });
+
+// ------------------------------------------------------------------- backends
+let lastT = 0;
+function loopBody(renderer, scene, camera){
+  const now = performance.now();
+  const dt  = Math.min((now - lastT) / 1000, .05);   // clamp after tab-switch
+  lastT = now;
+  update(dt);
+  if (DEBUG) el.dbg.textContent =
+    `${DEMO ? 'demo' : 'ar'} | fps ${(1/Math.max(dt,1e-3)).toFixed(0)} | ` +
+    `tracked ${S.tracked} | pieces ${S.pieces.length}`;
+  renderer.render(scene, camera);
+}
+
+/** MindAR image-tracking backend. */
+async function startAR(){
+  const { MindARThree } = await import('mindar-image-three');
+  const mindar = new MindARThree({ container: el.ar, imageTargetSrc: TARGET_SRC,
+                                   uiScanning:'no', uiLoading:'no' });
+  const { renderer, scene, camera } = mindar;
+  activeCamera = camera;
+
+  const anchor = mindar.addAnchor(0);
+  anchor.group.add(platter);
+  anchor.onTargetFound = () => {
+    S.tracked = true; showStatus('');
+    if (S.phase === 'playing') Sfx.hit(0);
+  };
+  anchor.onTargetLost = () => {
+    S.tracked = false;
+    if (S.phase === 'playing') showStatus('Lost the plate', 'Point back at the target to resume');
+  };
+
+  await mindar.start();
+  lastT = performance.now();
+  renderer.setAnimationLoop(() => loopBody(renderer, scene, camera));
+}
+
+/** No-target fallback: camera feed as backdrop, platter floating in front. */
+async function startDemo(){
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video:{ facingMode:'environment' }, audio:false });
+
+  const video = document.createElement('video');
+  Object.assign(video, { srcObject:stream, playsInline:true, muted:true, autoplay:true });
+  video.setAttribute('playsinline','');
+  Object.assign(video.style, { position:'fixed', inset:'0', width:'100%', height:'100%',
+                               objectFit:'cover' });
+  el.ar.appendChild(video);
+  await video.play();
+
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(innerWidth, innerHeight);
+  el.ar.appendChild(renderer.domElement);
+  Object.assign(renderer.domElement.style, { position:'fixed', inset:'0' });
+
+  const scene  = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, .01, 20);
+  activeCamera = camera;
+
+  // Lay the platter out like a table in front of the viewer.
+  const holder = new THREE.Group();
+  holder.position.set(0, -.12, -.85);
+  holder.rotation.x = -Math.PI / 2.9;
+  holder.add(platter);
+  scene.add(holder);
+
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+
+  lastT = performance.now();
+  renderer.setAnimationLoop(() => loopBody(renderer, scene, camera));
+}
+
+// ---------------------------------------------------------------------- boot
+let booted = false;
+async function boot(){
+  if (booted) return;
+  booted = true;
+  Sfx.unlock();
+  el.gate.hidden = true;
+  el.dbg.hidden = !DEBUG;
+  showStatus('Starting camera…');
+
+  try {
+    if (DEMO) await startDemo();
+    else      await startAR();
+    startRound();
+  } catch (e){
+    booted = false;
+    const msg = /NotAllowedError|Permission/i.test(String(e))
+      ? 'Camera permission was denied.\n\nEnable it for this site in your browser settings, then retry.'
+      : /targets?\.mind|fetch|404|Failed to load/i.test(String(e))
+        ? `Could not load the image target:\n  ${TARGET_SRC}\n\n` +
+          'Compile a target and place targets.mind next to index.html, ' +
+          'or append ?demo=1 to the URL to play without a target.\n\n' + (e.message || e)
+        : e;
+    fail(msg);
+  }
+}
+
+el.startBtn.addEventListener('click', boot);
+el.againBtn.addEventListener('click', () => { Sfx.unlock(); startRound(); });
+el.retryBtn.addEventListener('click', () => { el.err.hidden = true; el.gate.hidden = false; });
+
+if (DEMO){
+  el.gateMsg.textContent = 'Demo mode — no image target needed. The platter floats in front of you. Tap the sushi, dodge the wasabi.';
+  el.gateHint.innerHTML = 'Remove <code>?demo=1</code> once you have compiled a <code>targets.mind</code>.';
+}
+window.addEventListener('error',           e => fail(e.error || e.message));
+window.addEventListener('unhandledrejection', e => fail(e.reason));
+</script>
+</body>
+</html>
