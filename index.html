@@ -287,7 +287,7 @@ const LIFT   = .02;    // hover above the plate plane
 const platter = new THREE.Group();
 {
   const ring = mesh(GEO.ring, new THREE.MeshBasicMaterial({
-    color:0x4ec9a5, transparent:true, opacity:.34 }), [RADIUS, RADIUS, RADIUS]);
+    color:0x4ec9a5, transparent:true, opacity:.6 }), [RADIUS, RADIUS, RADIUS]);
   platter.add(ring);                       // confirms the anchor locked on
   platter.add(new THREE.HemisphereLight(0xffffff, 0x404a55, 2.1));
   const key = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -515,15 +515,29 @@ async function startDemo(){
 
   // Lay the platter out like a table in front of the viewer.
   const holder = new THREE.Group();
-  holder.position.set(0, -.12, -.85);
   holder.rotation.x = -Math.PI / 2.9;
   holder.add(platter);
   scene.add(holder);
+
+  // Fit the platter to the viewport. `fov` is the VERTICAL field of view, so on
+  // a portrait phone (aspect ~0.46) the horizontal view is far narrower than the
+  // vertical one — a fixed scale put half the orbit off-screen and sushi flew
+  // out of frame. Scale to whichever axis is tighter, and never magnify past 1:1.
+  const DIST = .95;
+  function fitPlatter(){
+    const halfH = DIST * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const halfW = halfH * camera.aspect;
+    const s = Math.min(1, .82 * Math.min(halfW, halfH) / RADIUS);
+    holder.scale.setScalar(s);
+    holder.position.set(0, -.10 * s, -DIST);
+  }
+  fitPlatter();
 
   addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth, innerHeight);
+    fitPlatter();                       // re-fit on rotate, or the clip returns
   });
 
   lastT = performance.now();
@@ -544,6 +558,10 @@ async function boot(){
     if (DEMO) await startDemo();
     else      await startAR();
     startRound();
+    if (DEMO){   // no target to hunt for, so say what to do instead
+      showStatus('Tap the sushi', 'Nothing to scan in demo mode');
+      setTimeout(() => showStatus(''), 2600);
+    }
   } catch (e){
     booted = false;
     const msg = /NotAllowedError|Permission/i.test(String(e))
