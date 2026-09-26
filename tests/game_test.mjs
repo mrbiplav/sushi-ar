@@ -1,222 +1,61 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#07090c">
-<title>Sushi Chef AR</title>
-<style>
-  :root{
-    --bg:#07090c;
-    --ink:#f6f8fa; --dim:#9ba5b0; --faint:#5d6771;
-    --good:#43d6a3; --bad:#ff5d5d; --hot:#ffb638; --cool:#5ec8ff;
-    --card:rgba(12,15,19,.72);
-    --edge:rgba(255,255,255,.13);
-    --safe-t:env(safe-area-inset-top,0px);
-    --safe-b:env(safe-area-inset-bottom,0px);
-    --r:16px;
-  }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
-    font:500 16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    overscroll-behavior:none;touch-action:none;user-select:none;-webkit-user-select:none;
-    -webkit-font-smoothing:antialiased}
+// Browser stub: enough DOM/canvas/audio for the game module to run in node.
+const noop = () => {};
+const mkCtx = () => new Proxy({}, {
+  get: (t, k) => (k === 'canvas' ? {} : (t[k] ??= noop)),
+  set: () => true,
+});
+const mkEl = (tag='div') => {
+  const e = {
+    tagName:tag, textContent:'', innerHTML:'', hidden:false, width:0, height:0,
+    offsetWidth:0, srcObject:null,
+    style:new Proxy({},{get:()=>'',set:()=>true}),
+    classList:{ _s:new Set(), add(c){this._s.add(c)}, remove(c){this._s.delete(c)},
+      toggle(c,v){ v===undefined ? (this._s.has(c)?this._s.delete(c):this._s.add(c))
+                                 : (v?this._s.add(c):this._s.delete(c)) },
+      contains(c){return this._s.has(c)} },
+    appendChild(){}, remove(){}, setAttribute(){}, addEventListener(){},
+    getContext:()=>mkCtx(), play:async()=>{},
+    _kids:[],
+    querySelector(sel){ return (this._kids.find(k=>k._sel===sel) || mkEl()); },
+    querySelectorAll(sel){ return this._kids.filter(k=>k._sel===sel); },
+  };
+  return e;
+};
+const bag = {};
+globalThis.document = {
+  getElementById:(id)=>(bag[id] ??= mkEl()),
+  createElement:(t)=>mkEl(t),
+  body:mkEl(), documentElement:mkEl(),
+};
+// #tries holds three .try pips
+bag.tries = mkEl();
+bag.tries._kids = [0,1,2].map(()=>{ const d=mkEl(); d._sel='.try'; return d; });
+// #banner holds a <b> and a <span>
+bag.banner = mkEl();
+bag.banner._kids = ['b','span'].map(s=>{ const d=mkEl(s); d._sel=s; return d; });
 
-  #ar{position:fixed;inset:0;width:100%;height:100%}
-  #ar canvas,#ar video{display:block}
+globalThis.window = globalThis;
+globalThis.location = { search:'' };
+globalThis.navigator = { vibrate(){}, mediaDevices:{ getUserMedia:async()=>({}) } };
+globalThis.devicePixelRatio = 2;
+globalThis.innerWidth = 390; globalThis.innerHeight = 844;
+globalThis.addEventListener = noop;
+const store = new Map();
+globalThis.localStorage = {
+  getItem:(k)=>store.has(k)?store.get(k):null,
+  setItem:(k,v)=>store.set(k,String(v)),
+};
+globalThis.AudioContext = class {
+  constructor(){ this.state='running'; this.currentTime=0; }
+  resume(){}
+  createOscillator(){ return { type:'', frequency:{value:0,setValueAtTime:noop},
+    connect:(x)=>x, start:noop, stop:noop }; }
+  createGain(){ return { gain:{setValueAtTime:noop,linearRampToValueAtTime:noop,
+    exponentialRampToValueAtTime:noop}, connect:(x)=>x }; }
+};
+globalThis.__BAG = bag;
 
-  .glass{background:var(--card);backdrop-filter:blur(14px) saturate(1.3);
-         -webkit-backdrop-filter:blur(14px) saturate(1.3);
-         border:1px solid var(--edge);border-radius:var(--r);
-         box-shadow:0 8px 28px rgba(0,0,0,.42)}
-
-  /* ---------------- HUD ---------------- */
-  #hud{position:fixed;inset:0;z-index:10;pointer-events:none;display:flex;
-       flex-direction:column;align-items:center;
-       padding:calc(var(--safe-t) + 10px) 12px calc(var(--safe-b) + 10px)}
-
-  /* top bar: score | tries */
-  #top{width:100%;max-width:520px;display:flex;justify-content:space-between;
-       align-items:center;gap:10px}
-  .stat{padding:7px 13px}
-  .cap{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);
-       font-weight:700}
-  .num{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;
-       letter-spacing:-.01em}
-  #tries{display:flex;gap:6px;padding:9px 13px;align-items:center}
-  .try{width:15px;height:15px;border-radius:50%;
-       background:linear-gradient(160deg,#ff8f6b,#e8455f);
-       box-shadow:0 0 0 2px rgba(255,255,255,.22) inset;
-       transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s,filter .3s}
-  .try.gone{opacity:.2;filter:grayscale(1) brightness(.5);transform:scale(.7)}
-
-  /* order ticket */
-  #ticket{margin-top:9px;width:100%;max-width:520px;padding:12px 14px 13px;
-          opacity:0;transform:translateY(-8px);transition:opacity .3s,transform .3s}
-  #ticket.on{opacity:1;transform:none}
-  #ticket.shake{animation:shake .4s}
-  @keyframes shake{
-    0%,100%{transform:translateX(0)} 15%{transform:translateX(-9px)}
-    30%{transform:translateX(8px)} 45%{transform:translateX(-6px)}
-    60%{transform:translateX(5px)} 80%{transform:translateX(-2px)}}
-  #orderNum{font-size:9px;letter-spacing:.14em;color:var(--faint);font-weight:700;
-            text-align:center;margin-bottom:2px}
-  /* timer */
-  #bar{margin-top:9px;height:4px;border-radius:99px;background:rgba(255,255,255,.12);
-       overflow:hidden}
-  #barFill{height:100%;width:100%;border-radius:99px;
-           background:linear-gradient(90deg,var(--good),var(--cool));
-           transform-origin:left center}
-  #bar.low #barFill{background:linear-gradient(90deg,var(--hot),var(--bad))}
-  /* next ingredient card */
-  #nextCard{margin-top:11px;display:flex;flex-direction:column;align-items:center;gap:6px}
-  #nextCard canvas{display:block;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.3)}
-  #nextCard .label{font-size:11px;color:var(--dim);font-weight:600;text-transform:uppercase;
-                   letter-spacing:.08em}
-  /* progress dots */
-  #progress{margin-top:11px;display:flex;justify-content:center;gap:8px;align-items:center}
-  .dot{width:13px;height:13px;border-radius:50%;border:2px solid var(--dim);
-       background:transparent;transition:all .3s}
-  .dot.done{border-color:transparent}
-  .dot.now{animation:dotPulse 1.2s ease-in-out infinite}
-  @keyframes dotPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
-
-  /* centre status */
-  #status{margin-top:auto;margin-bottom:auto;text-align:center;padding:0 26px;
-          opacity:0;transition:opacity .25s;text-shadow:0 2px 14px rgba(0,0,0,.8)}
-  #status.on{opacity:1}
-  #status b{display:block;font-size:19px;font-weight:800}
-  #status span{display:block;margin-top:5px;font-size:13px;color:var(--dim)}
-
-  /* floating popups */
-  #pops{position:absolute;inset:0;overflow:hidden}
-  .pop{position:absolute;transform:translate(-50%,-50%);font-weight:850;font-size:19px;
-       white-space:nowrap;animation:rise .85s cubic-bezier(.2,.7,.3,1) forwards;
-       text-shadow:0 2px 12px rgba(0,0,0,.75)}
-  @keyframes rise{to{transform:translate(-50%,-175%);opacity:0}}
-
-  /* banner for order complete */
-  #banner{position:absolute;left:50%;top:38%;transform:translate(-50%,-50%) scale(.8);
-          opacity:0;text-align:center;pointer-events:none}
-  #banner.on{animation:burst 1.1s cubic-bezier(.2,.8,.3,1) forwards}
-  @keyframes burst{
-    0%{opacity:0;transform:translate(-50%,-50%) scale(.75)}
-    18%{opacity:1;transform:translate(-50%,-50%) scale(1.06)}
-    30%{transform:translate(-50%,-50%) scale(1)}
-    100%{opacity:0;transform:translate(-50%,-90%) scale(1)}}
-  #banner b{display:block;font-size:27px;font-weight:850;color:var(--good);
-            letter-spacing:-.02em;text-shadow:0 3px 18px rgba(0,0,0,.8)}
-  #banner span{display:block;font-size:15px;font-weight:800;color:var(--hot);margin-top:3px}
-
-  #flash{position:fixed;inset:0;z-index:9;pointer-events:none;opacity:0;
-         transition:opacity .3s;box-shadow:inset 0 0 90px 22px var(--bad)}
-  #flash.on{opacity:1;transition:opacity .06s}
-
-  /* ---------------- overlays ---------------- */
-  .sheet{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
-         align-items:center;justify-content:center;text-align:center;
-         padding:34px 26px;background:rgba(6,8,11,.93);
-         backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
-  .sheet[hidden]{display:none}
-  .sheet h1{margin:0 0 2px;font-size:31px;font-weight:850;letter-spacing:-.025em}
-  .sheet p{margin:0;max-width:34ch;color:var(--dim);font-size:14.5px}
-  .btn{pointer-events:auto;margin-top:20px;border:0;border-radius:99px;
-       padding:16px 42px;font:850 17px/1 inherit;color:#07090c;background:var(--ink);
-       cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.4);
-       transition:transform .12s}
-  .btn:active{transform:scale(.955)}
-  .how{margin-top:20px;text-align:left;display:grid;gap:11px;max-width:31ch}
-  .how div{display:flex;gap:11px;align-items:flex-start;font-size:13.5px;color:var(--dim)}
-  .how b{flex:none;width:21px;height:21px;border-radius:50%;background:rgba(255,255,255,.1);
-         color:var(--ink);font-size:11px;font-weight:800;display:grid;place-items:center;
-         margin-top:1px}
-  .final{font-size:60px;font-weight:850;color:var(--hot);letter-spacing:-.035em;
-         font-variant-numeric:tabular-nums;line-height:1.05}
-  .sub{display:flex;gap:22px;margin-top:14px}
-  .sub div{text-align:center}
-  .sub .num{font-size:19px}
-  .hint{font-size:11.5px;color:var(--faint);max-width:35ch;margin-top:16px}
-  code{background:rgba(255,255,255,.1);padding:2px 6px;border-radius:5px;font-size:11.5px}
-  #errbox{white-space:pre-wrap;text-align:left;font:400 12px/1.5 ui-monospace,monospace;
-          color:#ffb9b9;background:rgba(255,93,93,.09);border:1px solid rgba(255,93,93,.28);
-          border-radius:11px;padding:13px;max-width:100%;overflow:auto;max-height:36vh;
-          margin-top:14px}
-  #dbg{position:fixed;left:9px;bottom:calc(var(--safe-b) + 9px);z-index:11;
-       font:400 11px/1.5 ui-monospace,monospace;color:#7fe3c4;pointer-events:none;
-       text-shadow:0 1px 4px #000}
-</style>
-</head>
-<body>
-
-<div id="ar"></div>
-
-<div id="hud">
-  <div id="top">
-    <div class="stat glass">
-      <div class="num" id="score">0</div>
-    </div>
-    <div id="tries" class="glass">
-      <div class="try"></div><div class="try"></div><div class="try"></div>
-    </div>
-  </div>
-
-  <div id="ticket" class="glass">
-    <div id="orderNum">ORDER #1</div>
-    <div id="nextCard"></div>
-    <div id="progress"></div>
-    <div id="bar"><div id="barFill"></div></div>
-  </div>
-
-  <div id="status"></div>
-  <div id="pops"></div>
-  <div id="banner"><b>PERFECT</b><span></span></div>
-</div>
-
-<div id="flash"></div>
-<div id="dbg" hidden></div>
-
-<section class="sheet" id="gate">
-  <h1>🍣</h1>
-  <div class="how">
-    <div><b>📷</b><span>👀 🃏</span></div>
-    <div><b>✨</b><span>👆</span></div>
-    <div><b>❤️❤️❤️</b></div>
-  </div>
-  <button class="btn" id="startBtn">▶️</button>
-  <p class="hint" id="gateHint"></p>
-</section>
-
-<section class="sheet" id="over" hidden>
-  <div class="final" id="finalScore">0</div>
-  <p id="overMsg"></p>
-  <div class="sub">
-    <div><div class="cap">🍱</div><div class="num" id="finalServed">0</div></div>
-    <div><div class="cap">🔥</div><div class="num" id="finalStreak">0</div></div>
-    <div><div class="cap">⭐</div><div class="num" id="finalBest">0</div></div>
-  </div>
-  <button class="btn" id="againBtn">▶️</button>
-</section>
-
-<section class="sheet" id="err" hidden>
-  <h1>Couldn't start</h1>
-  <div id="errbox"></div>
-  <button class="btn" id="retryBtn">Retry</button>
-</section>
-
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
-  }
-}
-</script>
-
-<script type="module">
 import * as THREE from 'three';
-
 /* =========================================================================
    SUSHI CHEF — NFC -> WebAR sushi-building game
    -------------------------------------------------------------------------
@@ -387,12 +226,8 @@ const GEO = {
 };
 
 // Toon material holds saturation better in AR and matches the watercolor target style
-const std = (color, o = {}) => {
-  const mat = new THREE.MeshToonMaterial({ color, transparent:true, ...o });
-  // Save original emissive state so highlight code can restore it (wasabi has built-in glow)
-  mat.userData.originalEmissiveIntensity = o.emissiveIntensity || 0;
-  return mat;
-};
+const std = (color, o = {}) => new THREE.MeshToonMaterial(
+  { color, transparent:true, ...o });
 
 function m(geo, mat, s, p, r){
   const o = new THREE.Mesh(geo, mat);
@@ -557,20 +392,6 @@ const buildSpot = new THREE.Group();     // where the sushi assembles
 const paletteRoot = new THREE.Group();
 const fx = new THREE.Group();
 let lockRing, matMesh;
-// Billboard transform reusable objects (allocated once, reused per frame)
-const bb = {
-  tempPos: new THREE.Vector3(),
-  cameraLocalPos: new THREE.Vector3(),
-  stackCenter: new THREE.Vector3(),
-  d: new THREE.Vector3(),
-  tempQuat: new THREE.Quaternion(),
-  boardQuat: new THREE.Quaternion(),
-  localQuat: new THREE.Quaternion(),
-  camUp: new THREE.Vector3(),
-  u: new THREE.Vector3(),
-  localZ: new THREE.Vector3(0, 0, 1),
-  targetQuat: new THREE.Quaternion(),
-};
 {
   // Bright ground color keeps PBR materials vibrant by reflecting light back up
   board.add(new THREE.HemisphereLight(0xffffff, 0xc8e0ff, 2.0));
@@ -776,7 +597,10 @@ function renderTicket(){
   const canvas = drawIngredientIcon(key, 120);
   el.nextCard.innerHTML = '';
   el.nextCard.appendChild(canvas);
-  // Ingredient name removed — icon shape + color is enough for visual matching
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = ING[key].name;
+  el.nextCard.appendChild(label);
 
   // Progress dots: filled for done, outlined for pending, pulsing for current
   el.progress.innerHTML = S.recipe.steps.map((k, i) => {
@@ -814,7 +638,6 @@ function sparkle(at, color){
       p.scale.setScalar(.012 * (1 - k * .5));
     }, () => { p.material.dispose(); fx.remove(p); });
   }
-  mt.dispose();  // Dispose base material after clones are made
 }
 
 /** Correct pick: fly the ingredient into the build stack. */
@@ -937,7 +760,7 @@ function startGame(){
   el.over.hidden = el.gate.hidden = true;
   el.score.textContent = '0';
   buildOrder();
-  showStatus(S.tracked ? '' : '📷 🃏');
+  showStatus(S.tracked ? '' : '📷', S.tracked ? '' : 'Find the card');
 }
 
 function gameOver(why){
@@ -978,54 +801,46 @@ function update(dt){
       it.node.scale.setScalar(0.95 + 0.15 * pulse);
       it.inner.traverse(o => {
         if (o.isMesh){
-          const original = o.material.userData.originalEmissiveIntensity || 0;
-          // Preserve original emissive color if it exists (wasabi), else use ingredient color
-          if (original > 0) {
-            // Has built-in glow (wasabi) — boost its intensity, keep its color
-            o.material.emissiveIntensity = original + 0.3 * pulse;
-          } else {
-            // No built-in glow — pulse with ingredient color
-            o.material.emissive.set(ING[needKey].color);
-            o.material.emissiveIntensity = 0.3 * pulse;
-          }
+          o.material.emissive.set(ING[needKey].color);
+          o.material.emissiveIntensity = 0.3 * pulse;
         }
       });
     } else if (it.alive){
-      // Reset non-highlighted items to their original emissive state
+      // Reset non-highlighted items
       it.node.scale.setScalar(1);
       it.inner.traverse(o => {
-        if (o.isMesh) {
-          o.material.emissiveIntensity = o.material.userData.originalEmissiveIntensity || 0;
-        }
+        if (o.isMesh) o.material.emissiveIntensity = 0;
       });
     }
   });
 
   // Billboard transform: orient buildSpot so stacked layers are visible edge-on and
   // aligned vertically on screen, rather than colinear with the view (invisible).
-  // Reuses pre-allocated objects from bb to avoid per-frame GC pressure.
   if (activeCamera && S.stack.length > 1) {
-    activeCamera.getWorldPosition(bb.tempPos);
-    bb.cameraLocalPos.copy(bb.tempPos);
-    board.worldToLocal(bb.cameraLocalPos);
-    bb.stackCenter.set(0, 0, LIFT + .014 + (S.stack.length - 1) * .026 / 2);
-    bb.d.subVectors(bb.cameraLocalPos, bb.stackCenter);
-    const distSq = bb.d.lengthSq();
+    const tempPos = new THREE.Vector3();
+    activeCamera.getWorldPosition(tempPos);
+    const cameraLocalPos = board.worldToLocal(tempPos.clone());
+    const stackCenter = new THREE.Vector3(0, 0, LIFT + .014 + (S.stack.length - 1) * .026 / 2);
+    const d = new THREE.Vector3().subVectors(cameraLocalPos, stackCenter);
+    const distSq = d.lengthSq();
     if (distSq >= 0.0001) {
-      bb.d.normalize();
-      activeCamera.getWorldQuaternion(bb.tempQuat);
-      board.getWorldQuaternion(bb.boardQuat);
-      bb.localQuat.copy(bb.boardQuat).invert().multiply(bb.tempQuat);
-      bb.camUp.set(0, 1, 0).applyQuaternion(bb.localQuat);
-      const dot = bb.camUp.dot(bb.d);
-      bb.u.copy(bb.camUp).addScaledVector(bb.d, -dot);
-      if (bb.u.lengthSq() < 0.0001) {
-        bb.u.set(bb.camUp.x, bb.camUp.y, 0);
-        if (bb.u.lengthSq() < 0.0001) bb.u.set(0, 1, 0);
+      d.normalize();
+      const tempQuat = new THREE.Quaternion();
+      activeCamera.getWorldQuaternion(tempQuat);
+      const boardQuat = new THREE.Quaternion();
+      board.getWorldQuaternion(boardQuat);
+      const localQuat = boardQuat.clone().invert().multiply(tempQuat);
+      const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(localQuat);
+      const dot = camUp.dot(d);
+      const u = camUp.clone().addScaledVector(d, -dot);
+      if (u.lengthSq() < 0.0001) {
+        u.set(camUp.x, camUp.y, 0);
+        if (u.lengthSq() < 0.0001) u.set(0, 1, 0);
       }
-      bb.u.normalize();
-      bb.targetQuat.setFromUnitVectors(bb.localZ, bb.u);
-      buildSpot.quaternion.slerp(bb.targetQuat, 0.12);
+      u.normalize();
+      const localZ = new THREE.Vector3(0, 0, 1);
+      const targetQuat = new THREE.Quaternion().setFromUnitVectors(localZ, u);
+      buildSpot.quaternion.slerp(targetQuat, 0.12);
     }
   }
 
@@ -1093,7 +908,7 @@ async function startAR(){
   anchor.group.add(board);
   anchor.onTargetFound = () => { S.tracked = true; showStatus(''); };
   anchor.onTargetLost  = () => { S.tracked = false;
-    if (S.phase === 'playing') showStatus('📷 🃏'); };
+    if (S.phase === 'playing') showStatus('📷', 'Find the card'); };
   await mindar.start();
 
   /* MindAR normalises anchor space to the target image's WIDTH (see the
@@ -1170,13 +985,13 @@ async function boot(){
   Sfx.unlock();
   el.gate.hidden = true;
   el.dbg.hidden = !DEBUG;
-  showStatus('📷');
+  showStatus('Starting camera…');
   try {
     if (DEMO) await startDemo(); else await startAR();
     showStatus('');
     startGame();
     if (DEMO){
-      showStatus('👀');
+      showStatus('Nothing to scan', 'Demo mode — the board is in front of you');
       setTimeout(() => showStatus(''), 2400);
     }
   } catch (e){
@@ -1197,6 +1012,5 @@ if (DEMO) el.gateHint.innerHTML =
   'Demo mode — no image target needed. Remove <code>?demo=1</code> once you have printed the target.';
 window.addEventListener('error', e => fail(e.error || e.message));
 window.addEventListener('unhandledrejection', e => fail(e.reason));
-</script>
-</body>
-</html>
+
+export { S, ING, RECIPES, update, startGame, buildOrder, acceptItem, penalise, board, paletteRoot, buildSpot, tweens, gameOver, RING, FIT, applyTargetAspect, relayout, ellipseRing, lockRing, matMesh };

@@ -6,3 +6,4 @@ node ../tools/mktest.mjs ../index.html stub.mjs game_test.mjs
 node chef.test.mjs
 node aspect.test.mjs
 node fit.test.mjs
+node stack.test.mjs
