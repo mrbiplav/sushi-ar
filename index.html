@@ -29,6 +29,18 @@
   #ar{position:fixed;inset:0;width:100%;height:100%}
   #ar canvas,#ar video{display:block}
 
+  /* Scanning guide: shows where to place the target card */
+  #scanGuide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+             width:min(85vw,400px);aspect-ratio:3/2;pointer-events:none;
+             border:3px solid var(--good);border-radius:12px;opacity:0;
+             transition:opacity .4s;box-shadow:0 0 0 9999px rgba(0,0,0,.5),
+             inset 0 0 30px rgba(67,214,163,.3)}
+  #scanGuide.on{opacity:1}
+  #scanGuide::before{content:'Place card here';position:absolute;top:-32px;
+                     left:50%;transform:translateX(-50%);font-size:14px;
+                     font-weight:700;color:var(--good);white-space:nowrap;
+                     text-shadow:0 2px 8px rgba(0,0,0,.8)}
+
   .glass{background:var(--card);backdrop-filter:blur(14px) saturate(1.3);
          -webkit-backdrop-filter:blur(14px) saturate(1.3);
          border:1px solid var(--edge);border-radius:var(--r);
@@ -158,7 +170,9 @@
 </head>
 <body>
 
-<div id="ar"></div>
+<div id="ar">
+  <div id="scanGuide"></div>
+</div>
 
 <div id="hud">
   <div id="top">
@@ -295,7 +309,7 @@ function ellipseRing(n, phase){
 // ------------------------------------------------------------------ DOM
 const $ = (id) => document.getElementById(id);
 const el = {
-  ar:$('ar'), score:$('score'), tries:$('tries'), ticket:$('ticket'),
+  ar:$('ar'), scanGuide:$('scanGuide'), score:$('score'), tries:$('tries'), ticket:$('ticket'),
   nextCard:$('nextCard'), orderNum:$('orderNum'), recipeName:$('recipeName'),
   bar:$('bar'), barFill:$('barFill'),
   progress:$('progress'), status:$('status'), pops:$('pops'), banner:$('banner'),
@@ -670,7 +684,7 @@ function labelSprite(text){
   tex.anisotropy = 4;
   const s = new THREE.Sprite(new THREE.SpriteMaterial(
     { map:tex, transparent:true, depthWrite:false }));
-  s.scale.set(.12, .03, 1);          // bigger, easily readable AR labels
+  s.scale.set(.24, .06, 1);          // large, very readable AR labels (2x)
   return s;
 }
 
@@ -1217,16 +1231,26 @@ async function startAR(){
   const { MindARThree } = await import('mindar-image-three');
   const mindar = new MindARThree({ container: el.ar, imageTargetSrc: TARGET_SRC,
                                    uiScanning:'no', uiLoading:'no',
-                                   filterMinCF: 1.0, filterBeta: 50,
+                                   filterMinCF: 3.0, filterBeta: 30,
                                    warmupTolerance: 8, missTolerance: 10 });
   const { renderer, scene, camera } = mindar;
   activeCamera = camera;
   const anchor = mindar.addAnchor(0);
   anchor.group.add(board);
-  anchor.onTargetFound = () => { S.tracked = true; showStatus(''); };
-  anchor.onTargetLost  = () => { S.tracked = false;
-    if (S.phase === 'playing') showStatus('📷 🃏'); };
+  anchor.onTargetFound = () => {
+    S.tracked = true;
+    showStatus('');
+    el.scanGuide.classList.remove('on');
+  };
+  anchor.onTargetLost  = () => {
+    S.tracked = false;
+    if (S.phase === 'playing'){
+      showStatus('📷 🃏');
+      el.scanGuide.classList.add('on');
+    }
+  };
   await mindar.start();
+  el.scanGuide.classList.add('on');  // Show scanning guide initially
 
   /* MindAR normalises anchor space to the target image's WIDTH (see the
      postMatrix it builds from markerDimensions), so the card's height is
