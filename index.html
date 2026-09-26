@@ -878,7 +878,7 @@ function buildOrder(){
     const node = new THREE.Group();
     node.add(tilted(inner));
     const lab = labelSprite(ING[key].name);
-    lab.position.set(0, 0, .075);
+    lab.position.set(0, 0, .14);   // further below model (labels are 2x bigger now)
     node.add(lab);
     node.position.set(pts[i][0], pts[i][1], LIFT);
     node.scale.setScalar(.001);
