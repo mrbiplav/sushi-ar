@@ -637,6 +637,94 @@ function labelSprite(text){
   return s;
 }
 
+/** Draw what the finished dish looks like (goal preview for the player). */
+function drawFinishedDish(recipe, size){
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d'), cx = size / 2, cy = size / 2;
+
+  if (recipe.form === 'nigiri'){
+    // Nigiri: rice base (oval) + topping (rounded rect on top)
+    const topColor = hex(ING[recipe.top].color);
+
+    // Rice base (cream oval)
+    g.fillStyle = hex(ING.rice.color);
+    g.strokeStyle = 'rgba(0,0,0,.2)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.ellipse(cx, cy + size * .08, size * .32, size * .18, 0, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+
+    // Topping (rounded rect overlay, slightly offset to show rice)
+    g.fillStyle = topColor;
+    g.strokeStyle = 'rgba(0,0,0,.25)';
+    g.lineWidth = 2;
+    g.beginPath();
+    const rx = size * .35, ry = size * .2, r = size * .06, dy = -size * .05;
+    g.moveTo(cx - rx + r, cy - ry + dy);
+    g.arcTo(cx + rx, cy - ry + dy, cx + rx, cy + ry + dy, r);
+    g.arcTo(cx + rx, cy + ry + dy, cx - rx, cy + ry + dy, r);
+    g.arcTo(cx - rx, cy + ry + dy, cx - rx, cy - ry + dy, r);
+    g.arcTo(cx - rx, cy - ry + dy, cx + rx, cy - ry + dy, r);
+    g.closePath();
+    g.fill(); g.stroke();
+
+    // Marbling lines on top
+    g.strokeStyle = 'rgba(255,255,255,.4)';
+    g.lineWidth = 2;
+    for (let i = 0; i < 2; i++){
+      const y = cy - size * .08 + i * size * .08 + dy;
+      g.beginPath();
+      g.moveTo(cx - size * .28, y);
+      g.lineTo(cx + size * .28, y);
+      g.stroke();
+    }
+  } else {
+    // Maki: nori ring (dark) + rice ring (cream) + filling center (colorful)
+    const topColor = hex(ING[recipe.top].color);
+
+    // Nori outer ring (dark green/black circle)
+    g.fillStyle = hex(ING.nori.color);
+    g.strokeStyle = 'rgba(0,0,0,.3)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.arc(cx, cy, size * .38, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+
+    // Rice ring (cream)
+    g.fillStyle = hex(ING.rice.color);
+    g.strokeStyle = 'rgba(0,0,0,.15)';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(cx, cy, size * .30, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+
+    // Center filling (the "top" ingredient color)
+    g.fillStyle = topColor;
+    g.strokeStyle = 'rgba(0,0,0,.2)';
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(cx, cy, size * .16, 0, Math.PI * 2);
+    g.fill(); g.stroke();
+
+    // Sesame speckle if the recipe has sesame
+    if (recipe.steps.includes('sesame')){
+      g.fillStyle = '#FFF9E6';
+      for (let i = 0; i < 8; i++){
+        const angle = (i / 8) * Math.PI * 2;
+        const dist = size * .24 + (Math.random() - 0.5) * size * .04;
+        const sx = cx + Math.cos(angle) * dist;
+        const sy = cy + Math.sin(angle) * dist;
+        g.beginPath();
+        g.arc(sx, sy, size * .02, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  }
+
+  return c;
+}
+
 /** Draw a large icon showing ingredient shape + color for the ticket card. */
 function drawIngredientIcon(key, size){
   const c = document.createElement('canvas');
@@ -774,15 +862,10 @@ function renderTicket(){
   el.orderNum.textContent = `ORDER #${S.served + 1}`;
   el.recipeName.textContent = S.recipe.name;
 
-  // Draw large icon of the NEXT needed ingredient
-  const key = S.recipe.steps[S.step];
-  const canvas = drawIngredientIcon(key, 120);
+  // Draw the finished dish preview (goal)
+  const canvas = drawFinishedDish(S.recipe, 140);
   el.nextCard.innerHTML = '';
   el.nextCard.appendChild(canvas);
-  const label = document.createElement('div');
-  label.className = 'label';
-  label.textContent = ING[key].name;
-  el.nextCard.appendChild(label);
 
   // Progress dots: filled for done, outlined for pending, pulsing for current
   el.progress.innerHTML = S.recipe.steps.map((k, i) => {
