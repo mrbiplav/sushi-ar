@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#07090c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;600;700;800&display=swap" rel="stylesheet">
 <title>Sushi Chef AR</title>
 <style>
   :root{
@@ -19,7 +22,7 @@
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
-    font:500 16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font:500 16px/1.45 'Urbanist',ui-sans-serif,system-ui,-apple-system,sans-serif;
     overscroll-behavior:none;touch-action:none;user-select:none;-webkit-user-select:none;
     -webkit-font-smoothing:antialiased}
 
@@ -45,11 +48,10 @@
   .num{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;
        letter-spacing:-.01em}
   #tries{display:flex;gap:6px;padding:9px 13px;align-items:center}
-  .try{width:15px;height:15px;border-radius:50%;
-       background:linear-gradient(160deg,#ff8f6b,#e8455f);
-       box-shadow:0 0 0 2px rgba(255,255,255,.22) inset;
-       transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s,filter .3s}
-  .try.gone{opacity:.2;filter:grayscale(1) brightness(.5);transform:scale(.7)}
+  .try{font-size:22px;line-height:1;transition:transform .3s cubic-bezier(.34,1.56,.64,1),
+       opacity .3s,filter .3s}
+  .try::before{content:'❤️'}
+  .try.gone{opacity:.3;filter:grayscale(1);transform:scale(.75)}
 
   /* order ticket */
   #ticket{margin-top:9px;width:100%;max-width:520px;padding:12px 14px 13px;
@@ -62,6 +64,8 @@
     60%{transform:translateX(5px)} 80%{transform:translateX(-2px)}}
   #orderNum{font-size:9px;letter-spacing:.14em;color:var(--faint);font-weight:700;
             text-align:center;margin-bottom:2px}
+  #recipeName{font-size:18px;font-weight:800;text-align:center;margin-bottom:8px;
+              letter-spacing:-.015em}
   /* timer */
   #bar{margin-top:9px;height:4px;border-radius:99px;background:rgba(255,255,255,.12);
        overflow:hidden}
@@ -163,6 +167,7 @@
 
   <div id="ticket" class="glass">
     <div id="orderNum">ORDER #1</div>
+    <div id="recipeName"></div>
     <div id="nextCard"></div>
     <div id="progress"></div>
     <div id="bar"><div id="barFill"></div></div>
@@ -177,14 +182,10 @@
 <div id="dbg" hidden></div>
 
 <section class="sheet" id="gate">
-  <h1>🍣</h1>
-  <div class="how">
-    <div><b>📷</b><span>👀 🃏</span></div>
-    <div><b>✨</b><span>👆</span></div>
-    <div><b>❤️❤️❤️</b></div>
-  </div>
-  <button class="btn" id="startBtn">▶️</button>
-  <p class="hint" id="gateHint"></p>
+  <h1>🍣 Sushi Chef</h1>
+  <p>Build sushi in AR</p>
+  <button class="btn" id="startBtn">Start</button>
+  <p class="hint" id="gateHint">Tap the glowing ingredient • You have 3 tries</p>
 </section>
 
 <section class="sheet" id="over" hidden>
@@ -290,7 +291,8 @@ function ellipseRing(n, phase){
 const $ = (id) => document.getElementById(id);
 const el = {
   ar:$('ar'), score:$('score'), tries:$('tries'), ticket:$('ticket'),
-  nextCard:$('nextCard'), orderNum:$('orderNum'), bar:$('bar'), barFill:$('barFill'),
+  nextCard:$('nextCard'), orderNum:$('orderNum'), recipeName:$('recipeName'),
+  bar:$('bar'), barFill:$('barFill'),
   progress:$('progress'), status:$('status'), pops:$('pops'), banner:$('banner'),
   flash:$('flash'), dbg:$('dbg'),
   gate:$('gate'), gateHint:$('gateHint'), startBtn:$('startBtn'),
@@ -770,13 +772,17 @@ function clearStack(){
 
 function renderTicket(){
   el.orderNum.textContent = `ORDER #${S.served + 1}`;
+  el.recipeName.textContent = S.recipe.name;
 
   // Draw large icon of the NEXT needed ingredient
   const key = S.recipe.steps[S.step];
   const canvas = drawIngredientIcon(key, 120);
   el.nextCard.innerHTML = '';
   el.nextCard.appendChild(canvas);
-  // Ingredient name removed — icon shape + color is enough for visual matching
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = ING[key].name;
+  el.nextCard.appendChild(label);
 
   // Progress dots: filled for done, outlined for pending, pulsing for current
   el.progress.innerHTML = S.recipe.steps.map((k, i) => {
