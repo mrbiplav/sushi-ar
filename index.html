@@ -79,12 +79,17 @@
   #nextCard .label{font-size:11px;color:var(--dim);font-weight:600;text-transform:uppercase;
                    letter-spacing:.08em}
   /* progress dots */
-  #progress{margin-top:11px;display:flex;justify-content:center;gap:8px;align-items:center}
+  #progress{margin-top:11px;display:flex;justify-content:center;gap:8px;align-items:center;
+            flex-wrap:wrap}
   .dot{width:13px;height:13px;border-radius:50%;border:2px solid var(--dim);
        background:transparent;transition:all .3s}
   .dot.done{border-color:transparent}
-  .dot.now{animation:dotPulse 1.2s ease-in-out infinite}
-  @keyframes dotPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.35)}}
+  .dot.now{width:auto;height:auto;border:none;background:transparent;
+           padding:6px 12px;border-radius:16px;
+           background:rgba(94,200,255,.16);border:1px solid rgba(94,200,255,.55);
+           font-size:13px;font-weight:700;color:#fff;letter-spacing:.02em;
+           animation:nowPulse 1.2s ease-in-out infinite}
+  @keyframes nowPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
 
   /* centre status */
   #status{margin-top:auto;margin-bottom:auto;text-align:center;padding:0 26px;
@@ -665,7 +670,7 @@ function labelSprite(text){
   tex.anisotropy = 4;
   const s = new THREE.Sprite(new THREE.SpriteMaterial(
     { map:tex, transparent:true, depthWrite:false }));
-  s.scale.set(.08, .02, 1);          // readable size for AR labels
+  s.scale.set(.12, .03, 1);          // bigger, easily readable AR labels
   return s;
 }
 
@@ -899,11 +904,17 @@ function renderTicket(){
   el.nextCard.innerHTML = '';
   el.nextCard.appendChild(canvas);
 
-  // Progress dots: filled for done, outlined for pending, pulsing for current
+  // Progress: filled dots for done, outlined for pending, text name for current
   el.progress.innerHTML = S.recipe.steps.map((k, i) => {
-    const cls = i < S.step ? 'dot done' : i === S.step ? 'dot now' : 'dot';
-    const bg = i < S.step ? hex(ING[k].color) : 'transparent';
-    return `<div class="${cls}" style="background:${bg}${i < S.step ? ';border-color:transparent' : ''}"></div>`;
+    if (i === S.step){
+      // Current step: show ingredient name as pulsing text
+      return `<div class="dot now">${ING[k].name}</div>`;
+    } else {
+      // Done or pending: show dot
+      const cls = i < S.step ? 'dot done' : 'dot';
+      const bg = i < S.step ? hex(ING[k].color) : 'transparent';
+      return `<div class="${cls}" style="background:${bg}${i < S.step ? ';border-color:transparent' : ''}"></div>`;
+    }
   }).join('');
 }
 
